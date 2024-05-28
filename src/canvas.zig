@@ -13,6 +13,7 @@ job_arena: std.heap.ArenaAllocator = undefined,
 inflight_cond: std.Thread.Condition = {},
 inflight_counter: threadsafe.Counter = {},
 inflight_mutex: std.Thread.Mutex = {},
+scheduled_jobs: usize = 0,
 
 const JobFunc: type = *const fn (job_data: *anyopaque, slice: []vm.Color32) void;
 
@@ -30,15 +31,11 @@ const TestJob = struct {
 };
 
 fn makeRenderWorker(self: *@This()) void {
-    while (true) {
+    while (true) { // this can deadlock if there's nothing in the queue to pop
         const job = self.job_queue.pop();
-        _ = self.inflight_counter.increment();
         @call(.auto, job.job_fn, .{ job.data, job.slice });
-
-        const prev_value = self.inflight_counter.decrement();
-        if (prev_value == 1) {
-            self.inflight_cond.signal();
-        }
+        _ = self.inflight_counter.increment();
+        self.inflight_cond.broadcast();
     }
 }
 
@@ -69,12 +66,13 @@ pub fn init(width: usize, height: usize, allocator: std.mem.Allocator) !*@This()
 
 pub fn finishJobs(self: *@This()) void {
     self.inflight_mutex.lock();
-    while (self.inflight_counter.get() > 0) {
+    defer self.inflight_mutex.unlock();
+    while (self.inflight_counter.get() < self.scheduled_jobs) {
         self.inflight_cond.wait(&self.inflight_mutex);
     }
-    self.inflight_mutex.unlock();
-
-    _ = self.job_arena.reset(.retain_capacity);
+    self.scheduled_jobs = 0;
+    _ = self.inflight_counter.reset();
+    _ = self.job_arena.reset(.free_all);
 }
 
 pub fn pixelToIndex(self: *@This(), x: i32, y: i32) usize {
@@ -108,6 +106,8 @@ fn chunk_work(self: *@This(), xmin: usize, ymin: usize, width: usize, height: us
             .job_fn = @as(JobFunc, @ptrCast(&T.execute)),
             .slice = slice,
         });
+
+        self.scheduled_jobs += 1;
     }
 }
 

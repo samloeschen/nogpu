@@ -91,6 +91,8 @@ pub fn runloop(self: *Self, app_context: anytype) void {
             }
         }
 
+        app_context.update();
+
         var timer = std.time.Timer.start() catch unreachable;
 
         self.canvas.finishJobs();
@@ -101,8 +103,6 @@ pub fn runloop(self: *Self, app_context: anytype) void {
         std.debug.print("end of frame\n", .{});
 
         present_canvas(self);
-
-        app_context.update();
 
         // c.SDL_RenderPresent(self.sdl_renderer_handle);
         // c.SDL_Delay(16);

@@ -90,7 +90,9 @@ pub const Counter = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
 
+        const prev_value = self.value;
         self.value = 0;
+        return prev_value;
     }
 
     pub fn get(self: *@This()) usize {
