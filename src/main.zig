@@ -12,7 +12,7 @@ const WIDTH = 640;
 const HEIGHT = 480;
 
 pub const AppData = struct {
-    window_canvas: Canvas,
+    window_canvas: *Canvas,
 };
 
 pub fn color32tou32(color32: @Vector(4, u8)) u32 {
@@ -28,7 +28,9 @@ pub fn main() !void {
     try Window.start_sdl();
     defer Window.quit_sdl();
 
-    var window = try Window.create(WIDTH, HEIGHT, allocator);
+    var window = try Window.init(WIDTH, HEIGHT, allocator);
+    errdefer (window.destroy());
+
     defer window.destroy();
 
     var app_data = AppData{
@@ -39,14 +41,17 @@ pub fn main() !void {
     const ctx = struct {
         game: *Game,
         app_data: *AppData,
-        pub fn update(self: @This()) void {
+        pub fn update(self: *@This()) void {
             self.game.update(self.app_data);
         }
     };
 
     game.init(&app_data);
-    window.runloop(ctx{
+
+    var context: ctx = .{
         .game = &game,
         .app_data = &app_data,
-    });
+    };
+
+    window.runloop(&context);
 }

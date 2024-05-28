@@ -8,11 +8,11 @@ const vm = @import("vectormath.zig");
 const app = @import("main.zig");
 const Self = @This();
 
-size: vm.vec2i = undefined,
+size: @Vector(2, usize) = undefined,
 sdl_renderer_handle: *c.struct_SDL_Renderer = undefined,
 sdl_screen_handle: *c.struct_SDL_Window = undefined,
 
-canvas: Canvas = undefined,
+canvas: *Canvas = undefined,
 canvas_surface: *c.struct_SDL_Surface = undefined,
 instant: std.time.Instant = undefined,
 
@@ -27,36 +27,39 @@ pub fn quit_sdl() void {
     c.SDL_Quit();
 }
 
-pub fn create(width: i32, height: i32, allocator: std.mem.Allocator) !Self {
+pub fn init(width: usize, height: usize, allocator: std.mem.Allocator) !*Self {
     const flags = 0;
 
-    const screen_handle = c.SDL_CreateWindow("nogpu", c.SDL_WINDOWPOS_UNDEFINED, c.SDL_WINDOWPOS_UNDEFINED, width, height, flags) orelse {
+    const screen_handle = c.SDL_CreateWindow("nogpu", c.SDL_WINDOWPOS_UNDEFINED, c.SDL_WINDOWPOS_UNDEFINED, @intCast(width), @intCast(height), flags) orelse {
         c.SDL_Log("Unable to create window: %s", c.SDL_GetError());
         return error.SDLInitializationFailed;
     };
 
-    const canvas_surface = c.SDL_CreateRGBSurfaceWithFormat(0, width, height, 0, c.SDL_PIXELFORMAT_ARGB8888);
+    const canvas_surface = c.SDL_CreateRGBSurfaceWithFormat(0, @intCast(width), @intCast(height), 0, c.SDL_PIXELFORMAT_ARGB8888);
 
     const renderer_handle = c.SDL_CreateSoftwareRenderer(canvas_surface) orelse {
         c.SDL_Log("Unable to create renderer: %s", c.SDL_GetError());
         return error.SDLInitializationFailed;
     };
 
-    return .{
-        .sdl_renderer_handle = renderer_handle,
-        .sdl_screen_handle = screen_handle,
-        .size = vm.vec2i{ width, height },
-        .canvas = try Canvas.create(width, height, allocator),
-        .canvas_surface = canvas_surface,
-    };
+    const window = try allocator.create(Self);
+    errdefer (allocator.destroy(window));
+
+    window.sdl_renderer_handle = renderer_handle;
+    window.sdl_screen_handle = screen_handle;
+    window.size = .{ width, height };
+    window.canvas = try Canvas.init(width, height, allocator);
+    window.canvas_surface = canvas_surface;
+
+    return window;
 }
 
-pub fn destroy(self: Self) void {
+pub fn destroy(self: *Self) void {
     c.SDL_DestroyRenderer(self.sdl_renderer_handle);
     c.SDL_DestroyWindow(self.sdl_screen_handle);
 }
 
-fn present_canvas(self: Self) void {
+fn present_canvas(self: *Self) void {
     const window_surface = c.SDL_GetWindowSurface(self.sdl_screen_handle);
 
     const w = @as(usize, @intCast(self.size[0]));
@@ -75,7 +78,7 @@ fn present_canvas(self: Self) void {
     _ = c.SDL_UpdateWindowSurface(self.sdl_screen_handle);
 }
 
-pub fn runloop(self: Self, app_context: anytype) void {
+pub fn runloop(self: *Self, app_context: anytype) void {
     var quit = false;
     while (!quit) {
         var event: c.SDL_Event = undefined;
@@ -88,7 +91,17 @@ pub fn runloop(self: Self, app_context: anytype) void {
             }
         }
 
+        var timer = std.time.Timer.start() catch unreachable;
+
+        self.canvas.finishJobs();
+
+        const elapsed = timer.read();
+        const elapsed_ms = @as(f64, @floatFromInt(elapsed)) / @as(f64, @floatFromInt(std.time.ns_per_ms));
+        std.debug.print("drawing took {d} ms \n", .{elapsed_ms});
+        std.debug.print("end of frame\n", .{});
+
         present_canvas(self);
+
         app_context.update();
 
         // c.SDL_RenderPresent(self.sdl_renderer_handle);
